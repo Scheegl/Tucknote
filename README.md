@@ -65,7 +65,16 @@ For a source ZIP, open Terminal, change into the extracted folder, then run `./b
 
 <img src="docs/images/menubar-mark.png" width="22" height="22" alt="Tucknote pocket mark">
 
-Look for the pocket icon in your Mac's menu bar. Tucknote runs there by design. Right-click the icon for **Open Inbox**, **Settings**, **Refresh Link Titles**, and **Quit Tucknote**.
+Look for the pocket icon in your Mac's menu bar. Tucknote runs there by design. Right-click the icon for **Open Inbox**, **Settings**, **Refresh Link Titles**, **About Tucknote**, and **Quit Tucknote**.
+
+### Update Tucknote
+
+Right-click the pocket icon, open **About Tucknote**, and click **Check for Updates…**. This free, on-demand check compares your installed version with the latest stable [GitHub Release](https://github.com/Scheegl/tucknote/releases). It works without a GitHub account. The app shows the version and build number in the same window.
+
+- **Installed from source?** When a new source release is available, open it from the update window and download its **Source code (zip)**. Extract it and run `./build.sh`. If you cloned the repo, fetch tags and check out the tag shown on the release page before rebuilding.
+- **Installed from an app ZIP?** Open the release downloads and get the new `Tucknote-…-macos-arm64.zip`. Quit Tucknote, unzip the download, and replace `Tucknote.app` in **Applications**. Your inbox is stored separately.
+
+Update checks run only when requested. Tucknote opens the official release page for manual installation.
 
 ## Keyboard shortcuts
 

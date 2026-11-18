@@ -37,6 +37,30 @@ enum InboxChecks {
             preconditionFailure("An archived YouTube link was saved twice")
         }
         precondition(original.id == stored.id && duplicates.entries.count == 1)
+        try checkUpdates()
         print("Tucknote checks passed")
+    }
+
+    private static func checkUpdates() throws {
+        let app = Data(#"{"tag_name":"v1.10","draft":false,"prerelease":false,"assets":[{"name":"Tucknote-1.10-macos-arm64.zip","state":"uploaded","size":42}]}"#.utf8)
+        let source = Data(#"{"tag_name":"v1.10","draft":false,"prerelease":false,"assets":[]}"#.utf8)
+        let preview = Data(#"{"tag_name":"v1.10","draft":false,"prerelease":true,"assets":[]}"#.utf8)
+        let page = URL(string: "https://github.com/Scheegl/tucknote/releases/tag/v1.10")!
+        let checks: [(Int, Data, String, Updates.Result)] = [
+            (404, Data(), "1.9", .noRelease),
+            (200, app, "1.9", .newer(version: "1.10", page: page, appAvailable: true)),
+            (200, source, "1.9", .newer(version: "1.10", page: page, appAvailable: false)),
+            (200, app, "1.10.0", .upToDate),
+            (200, app, "2.0", .upToDate),
+            (200, preview, "1.9", .noRelease)
+        ]
+        for (status, data, current, expected) in checks {
+            let result = try Updates.result(status: status, data: data, current: current)
+            precondition(result == expected)
+        }
+        do {
+            _ = try Updates.result(status: 403, data: Data(), current: "1.9")
+            preconditionFailure("A rate limit was treated as no update")
+        } catch Updates.Failure.invalidResponse {}
     }
 }
