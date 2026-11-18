@@ -26,6 +26,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
     private let preferences = Preferences()
     private var inboxWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var aboutWindow: NSWindow?
     private var hotkey: Hotkey?
     private var pasteMonitor: Any?
     private let navigation = InboxNavigation()
@@ -36,6 +37,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
         for (title, action) in [("Open Inbox", #selector(openInbox)),
                                 ("Refresh Link Titles", #selector(refreshLinkTitles)),
                                 ("Settings…", #selector(openSettings)),
+                                ("About Tucknote", #selector(openAbout)),
                                 ("Quit Tucknote", #selector(quit))] {
             if action == #selector(quit) { menu.addItem(.separator()) }
             let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
@@ -78,6 +80,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
         popover?.appearance = preferences.appearance.native
         inboxWindow?.appearance = preferences.appearance.native
         settingsWindow?.appearance = preferences.appearance.native
+        aboutWindow?.appearance = preferences.appearance.native
         updateCounter()
     }
 
@@ -86,6 +89,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
         let main = NSMenu()
         let application = NSMenuItem()
         let appMenu = NSMenu(title: "Tucknote")
+        appMenu.addItem(withTitle: "About Tucknote", action: #selector(openAbout), keyEquivalent: "").target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Tucknote", action: #selector(quit), keyEquivalent: "q").target = self
         application.submenu = appMenu
         main.addItem(application)
@@ -171,6 +176,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
             navigation.destination = nil
         }
         if window === settingsWindow { settingsWindow = nil }
+        if window === aboutWindow { aboutWindow = nil }
     }
 
     @objc private func refreshLinkTitles() { inbox.refreshLinkTitles() }
@@ -187,10 +193,22 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
     @objc private func openSettings() {
         preferences.refreshLogin()
         if settingsWindow == nil {
-            settingsWindow = makeWindow(title: "Tucknote Settings", view: PreferencesView(preferences: preferences),
+            settingsWindow = makeWindow(title: "Tucknote Settings", view: PreferencesView(
+                                            preferences: preferences,
+                                            openAbout: { [weak self] in self?.openAbout() }
+                                        ),
                                         size: NSSize(width: 420, height: 320))
         }
         show(settingsWindow)
+    }
+
+    @objc private func openAbout() {
+        if aboutWindow == nil {
+            aboutWindow = makeWindow(title: "About Tucknote", view: AboutTucknote(),
+                                     size: NSSize(width: 420, height: 240))
+            aboutWindow?.styleMask.remove([.resizable, .miniaturizable])
+        }
+        show(aboutWindow)
     }
 
     private func activate() {

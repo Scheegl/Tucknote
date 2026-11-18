@@ -51,6 +51,7 @@ final class Preferences: ObservableObject {
 
 struct PreferencesView: View {
     @ObservedObject var preferences: Preferences
+    let openAbout: () -> Void
     @AppStorage(Inbox.automaticTitlesKey) private var automaticTitles = false
 
     var body: some View {
@@ -83,8 +84,7 @@ struct PreferencesView: View {
                 .font(.callout).foregroundStyle(.secondary)
             Text("Select with Up or Down. Return edits. Command + Shift + A archives.")
                 .font(.callout).foregroundStyle(.secondary)
-            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.6")")
-                .foregroundStyle(.secondary)
+            Button("About Tucknote…", action: openAbout)
         }
         .padding(22).frame(width: 420, alignment: .leading)
         .modifier(TucknoteSurface())
