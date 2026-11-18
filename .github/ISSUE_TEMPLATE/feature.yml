@@ -1,0 +1,17 @@
+name: Suggest an improvement
+description: Propose a change to capture, search, or organize entries.
+title: "[Idea] "
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What are you trying to do?
+      description: Describe your workflow and where it slows you down.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you change?
+    validations:
+      required: true

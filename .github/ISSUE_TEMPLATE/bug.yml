@@ -1,0 +1,26 @@
+name: Report a bug
+description: Tell us what went wrong in Tucknote.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: Use the repository Security tab for vulnerabilities. Remove personal links, notes, paths, or tokens from logs and screenshots.
+  - type: input
+    id: environment
+    attributes:
+      label: Tucknote version, macOS version, and Mac model
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use example links or text that can be shared publicly.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened and what did you expect?
+    validations:
+      required: true
