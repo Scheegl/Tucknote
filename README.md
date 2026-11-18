@@ -4,7 +4,7 @@ A local inbox for thoughts, links, and small tasks. Requires macOS 13 or later o
 
 ## Install
 
-**Download:** Open this repository's **Releases** page and download the latest `Tucknote-…-macos-arm64.zip` from **Assets**. Unzip it, drag `Tucknote.app` into **Applications**, and open it. The separate **Source code** archives contain the project files.
+**Download:** The first notarized app download is pending. When available, the [Releases](https://github.com/Scheegl/tucknote/releases) page will list `Tucknote-…-macos-arm64.zip` under **Assets**. Unzip it, drag `Tucknote.app` into **Applications**, and open it. The separate **Source code** archives contain the project files.
 
 **Build from source:** Clone this repository using the URL under **Code**. On an Apple Silicon Mac with macOS 13 or later and Apple Command Line Tools, run `./build.sh` from the checkout. Open `build/Tucknote.app` or copy it into **Applications**.
 
