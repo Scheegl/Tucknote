@@ -31,6 +31,8 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
     private var pasteMonitor: Any?
     private let navigation = InboxNavigation()
     private let draft = CaptureDraft()
+    private var readyForCapture = false
+    private var openIncomingOnLaunch = false
 
     private lazy var statusMenu: NSMenu = {
         let menu = NSMenu()
@@ -69,6 +71,34 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
         applyPreferences()
         hotkey = Hotkey { [weak self] in self?.showCapture() }
         preferences.hotkeyAvailable = hotkey != nil
+        readyForCapture = true
+        NSApp.servicesProvider = self
+        if openIncomingOnLaunch { showCapture() }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls.prefix(10) {
+            if let text = CaptureInput.fromURL(url) { receive(text) }
+        }
+    }
+
+    @objc(captureSelection:userData:error:)
+    func captureSelection(_ pasteboard: NSPasteboard, userData: String?,
+                          error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        let selection = pasteboard.string(forType: .URL).flatMap { webURL($0)?.absoluteString }
+            ?? pasteboard.string(forType: .string)
+        guard let selection, receive(selection) else {
+            error.pointee = "Tucknote could not stage the selection. Check the draft queue and try a shorter selection."
+            return
+        }
+    }
+
+    @discardableResult
+    private func receive(_ text: String) -> Bool {
+        guard draft.receive(text) else { return false }
+        if readyForCapture { showCapture() }
+        else { openIncomingOnLaunch = true }
+        return true
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -110,6 +140,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSApp.servicesProvider = nil
         if let pasteMonitor { NSEvent.removeMonitor(pasteMonitor) }
     }
 
@@ -135,6 +166,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
     private func showCapture() {
         guard let button = statusItem.button else { return }
         installEditMenu()
+        inbox.refreshVisibleLinkTitles()
         let capture = popover ?? makeCapture()
         if !capture.isShown {
             capture.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -184,6 +216,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWi
     @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func openInbox() {
+        inbox.refreshVisibleLinkTitles()
         if inboxWindow == nil {
             inboxWindow = makeWindow(title: "Tucknote", view: InboxWindow(inbox: inbox, navigation: navigation), size: NSSize(width: 780, height: 490))
         }

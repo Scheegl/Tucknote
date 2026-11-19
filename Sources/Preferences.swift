@@ -52,7 +52,7 @@ final class Preferences: ObservableObject {
 struct PreferencesView: View {
     @ObservedObject var preferences: Preferences
     let openAbout: () -> Void
-    @AppStorage(Inbox.automaticTitlesKey) private var automaticTitles = false
+    @AppStorage(Inbox.automaticTitlesKey) private var automaticTitles = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -75,8 +75,8 @@ struct PreferencesView: View {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }
             Toggle("Show inbox count in menu bar", isOn: $preferences.showCount)
-            Toggle("Fetch link titles automatically", isOn: $automaticTitles)
-                .help("Contacts the HTTPS sites you save. Refresh Link Titles is available on demand.")
+            Toggle("Fetch titles from other sites automatically", isOn: $automaticTitles)
+                .help("Reads titles and short descriptions from public HTTPS pages.")
             Divider()
             Text(preferences.hotkeyAvailable ? "Quick capture: Control + Option + Space" :
                     "Shortcut unavailable. Use the menu bar icon.")

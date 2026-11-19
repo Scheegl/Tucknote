@@ -76,6 +76,13 @@ Right-click the pocket icon, open **About Tucknote**, and click **Check for Upda
 
 Update checks run only when requested. Tucknote opens the official release page for manual installation.
 
+## Capture from other apps
+
+- **macOS Services:** Select text in a compatible app, then choose **Services → Capture in Tucknote**. If the service is hidden, look under **System Settings → Keyboard → Keyboard Shortcuts → Services**.
+- **Shortcuts, browsers, and launchers:** Open a URL like `tucknote://capture?text=Read%20this%20later`. Pass the URL-encoded text as the single `text` parameter. In Shortcuts, encode the text before appending it to `tucknote://capture?text=`, then use **Open URLs**.
+
+Both options stage a draft for review. Press **Add** or **Return** to save it. If you already have a draft, incoming items wait until you save it or clear the input and choose **Show Next**. The queue is temporary and clears when Tucknote quits.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -91,7 +98,7 @@ Update checks run only when requested. Tucknote opens the official release page 
 
 Entries stay on your Mac in `~/Library/Application Support/Laterfold/inbox.json`. Tucknote retains the original storage path so earlier installs can open the same inbox. Plain-text capture, search, and categories work offline.
 
-Automatic title fetching is off by default. To fetch titles, choose **Refresh Link Titles** or turn on **Fetch link titles automatically** in Settings. This contacts the saved HTTPS sites. Links still open when a page does not expose a title. Read [SECURITY.md](SECURITY.md) for details.
+YouTube titles are fetched automatically using canonical video or playlist IDs. For other HTTPS sites, Tucknote reads the page title and a short description when available. Hover over a link to see its description. You can turn off automatic fetching in Settings and use **Refresh Link Titles** on demand. Links still open when a page does not expose a title. Read [SECURITY.md](SECURITY.md) for details.
 
 ## Contribute
 

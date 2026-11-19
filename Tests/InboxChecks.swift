@@ -27,6 +27,12 @@ enum InboxChecks {
         precondition(LinkMetadata.htmlTitle("<meta property=\"og:title\" content=\"Tea &amp; biscuits\">", for: https)
                      == "Tea & biscuits")
 
+        let preview = LinkMetadata.htmlPreview(
+            #"<title>Test article</title><meta name='description' content='A small &amp; readable summary'>"#,
+            for: https
+        )
+        precondition(preview == LinkMetadata.Preview(title: "Test article", description: "A small & readable summary"))
+
         let long = URL(string: "https://www.youtube.com/watch?v=jNQXAC9IVRw")!
         let short = URL(string: "https://youtu.be/jNQXAC9IVRw?t=4")!
         precondition(LinkMetadata.canonicalYouTubeURL(for: long) == LinkMetadata.canonicalYouTubeURL(for: short))
@@ -37,8 +43,77 @@ enum InboxChecks {
             preconditionFailure("An archived YouTube link was saved twice")
         }
         precondition(original.id == stored.id && duplicates.entries.count == 1)
+        try checkStorage(root)
+        checkCapture()
         try checkUpdates()
         print("Tucknote checks passed")
+    }
+
+    @MainActor
+    private static func checkStorage(_ root: URL) throws {
+        let file = root.appendingPathComponent("Concurrent/inbox.json")
+        let before = Inbox(file: file)
+        let other = Inbox(file: file)
+        guard case .saved = before.add("First", category: nil),
+              case .failed = other.add("Second", category: nil) else {
+            preconditionFailure("A stale write was not detected")
+        }
+        precondition(other.entries.map(\.title) == ["First"])
+        guard case .saved = other.add("Second", category: nil) else {
+            preconditionFailure("The write did not recover after refresh")
+        }
+        precondition(Inbox(file: file).entries.map(\.title) == ["First", "Second"])
+
+        let legacy = Data(#"[{"id":"FEF23C84-C147-4BCA-9BB3-22F3987DDE90","title":"Old","site":"example.org","category":"Почитать","createdAt":1,"status":"inbox"}]"#.utf8)
+        try legacy.write(to: file, options: .atomic)
+        let migrated = Inbox(file: file)
+        precondition(migrated.entries.first?.category == .read)
+        precondition(migrated.entries.first?.titleWasEdited == false)
+
+        let bad = Data("corrupt inbox".utf8)
+        try bad.write(to: file, options: .atomic)
+        let corrupt = Inbox(file: file)
+        guard case .failed = corrupt.add("Keep the original", category: nil) else {
+            preconditionFailure("Corrupt data was overwritten")
+        }
+        let preserved = try Data(contentsOf: file)
+        precondition(preserved == bad && corrupt.error != nil)
+        let link = file.deletingLastPathComponent().appendingPathComponent("symlink.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+        precondition(Inbox(file: link).error != nil)
+
+        let duplicatesFile = root.appendingPathComponent("EditDuplicates/inbox.json")
+        let store = InboxStore(file: duplicatesFile)
+        let video = Entry(title: "Existing video", url: URL(string: "https://youtu.be/jNQXAC9IVRw"))
+        let note = Entry(title: "Edit me")
+        _ = try store.write([video, note], replacing: nil)
+        let duplicates = Inbox(file: duplicatesFile)
+        var edited = note
+        edited.url = URL(string: "https://www.youtube.com/watch?v=jNQXAC9IVRw")
+        precondition(!duplicates.edit(edited, originalTitle: note.title))
+        precondition(duplicates.entries.last?.url == nil)
+    }
+
+    @MainActor
+    private static func checkCapture() {
+        func capture(_ string: String) -> String? { URL(string: string).flatMap(CaptureInput.fromURL) }
+        precondition(capture("tucknote://capture?text=Hello%20%26%20world") == "Hello & world")
+        precondition(capture("tucknote://capture?text=%F0%9F%93%9D") == "📝")
+        precondition(capture("tucknote://capture?text=One&text=Two") == nil)
+        precondition(capture("tucknote://capture?text=%00") == nil)
+        precondition(capture("tucknote://other?text=Hello") == nil)
+        precondition(CaptureInput.validate(String(repeating: "x", count: 32769)) == nil)
+
+        let draft = CaptureDraft()
+        draft.input = "Unsaved draft"
+        precondition(draft.receive("First imported draft"))
+        precondition(draft.receive("Second imported draft"))
+        precondition(draft.receive("Second imported draft"))
+        precondition(draft.input == "Unsaved draft" && draft.waitingCount == 2)
+        draft.clearAndAdvance()
+        precondition(draft.input == "First imported draft" && draft.waitingCount == 1)
+        draft.clearAndAdvance()
+        precondition(draft.input == "Second imported draft" && draft.waitingCount == 0)
     }
 
     private static func checkUpdates() throws {

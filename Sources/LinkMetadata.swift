@@ -2,6 +2,11 @@ import CoreFoundation
 import Foundation
 
 enum LinkMetadata {
+    struct Preview: Equatable {
+        let title: String?
+        let description: String?
+    }
+
     private struct Embed: Decodable { let title: String }
 
     static func allowsRequest(to url: URL) -> Bool {
@@ -80,7 +85,11 @@ enum LinkMetadata {
         return endpoint.url
     }
 
-    static func title(for url: URL) async -> String? {
+    static func title(for url: URL, allowPageFetch: Bool = true) async -> String? {
+        await preview(for: url, allowPageFetch: allowPageFetch)?.title
+    }
+
+    static func preview(for url: URL, allowPageFetch: Bool = true) async -> Preview? {
         guard allowsRequest(to: url) else { return nil }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
@@ -96,9 +105,9 @@ enum LinkMetadata {
            let (data, _) = try? await read(session, url: endpoint, types: ["application/json"], limit: 16 * 1024),
            let embed = try? JSONDecoder().decode(Embed.self, from: data) {
             let title = normalize(embed.title)
-            if !needsTitle(title, for: url) { return title }
+            if !needsTitle(title, for: url) { return Preview(title: title, description: nil) }
         }
-        guard !Task.isCancelled,
+        guard allowPageFetch, !Task.isCancelled,
               let (data, response) = try? await read(session, url: url,
                   types: ["text/html", "application/xhtml+xml"], limit: 192 * 1024) else { return nil }
         let encoding = response.textEncodingName.map {
@@ -108,7 +117,7 @@ enum LinkMetadata {
             ? String(decoding: data, as: UTF8.self)
             : String(data: data, encoding: String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(encoding)))
                 ?? String(decoding: data, as: UTF8.self)
-        return htmlTitle(html, for: url)
+        return htmlPreview(html, for: url)
     }
 
     private static func read(_ session: URLSession, url: URL, types: [String], limit: Int) async throws
@@ -129,6 +138,10 @@ enum LinkMetadata {
     }
 
     static func htmlTitle(_ html: String, for url: URL) -> String? {
+        htmlPreview(html, for: url)?.title
+    }
+
+    static func htmlPreview(_ html: String, for url: URL) -> Preview? {
         let head = html.range(of: "</head>", options: .caseInsensitive).map { String(html[..<$0.lowerBound]) } ?? html
         let metaPattern = #"<meta\s+(?:"[^"]*"|'[^']*'|[^'"<>]++)*>"#
         let attributePattern = #"([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"#
@@ -148,10 +161,16 @@ enum LinkMetadata {
             .flatMap { capture($0, 1, in: head) }
         let siteName = metadata["og:site_name"].map { normalize(decodeEntities($0)) }
         let isHomepage = url.path.isEmpty || url.path == "/"
-        return [metadata["og:title"], metadata["twitter:title"], pageTitle].compactMap { $0 }
+        let title = [metadata["og:title"], metadata["twitter:title"], pageTitle].compactMap { $0 }
             .map { normalize(decodeEntities($0)) }.first {
                 !needsTitle($0, for: url) && (isHomepage || siteName?.caseInsensitiveCompare($0) != .orderedSame)
             }
+        let description = [metadata["og:description"], metadata["description"], metadata["twitter:description"]]
+            .compactMap { $0 }
+            .map { String(normalize(decodeEntities($0)).prefix(280)) }
+            .first { !$0.isEmpty && $0 != title }
+        guard title != nil || description != nil else { return nil }
+        return Preview(title: title, description: description)
     }
 
     private static func matches(_ pattern: String, in text: String) -> [NSTextCheckingResult] {
