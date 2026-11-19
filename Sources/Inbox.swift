@@ -23,14 +23,33 @@ struct Entry: Codable, Identifiable {
     var id = UUID()
     var title: String
     var url: URL?
-    var site: String?
     var category: Category?
     var note: String?
+    var linkDescription: String?
     var createdAt = Date()
     var status: EntryStatus = .inbox
     var titleWasEdited = false
 
     var siteTag: String? { url.flatMap(LinkMetadata.siteTag(for:)) }
+}
+
+extension Entry {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, url, category, note, linkDescription, createdAt, status, titleWasEdited
+    }
+
+    init(from decoder: Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        id = try fields.decode(UUID.self, forKey: .id)
+        title = try fields.decode(String.self, forKey: .title)
+        url = try fields.decodeIfPresent(URL.self, forKey: .url)
+        category = try fields.decodeIfPresent(Category.self, forKey: .category)
+        note = try fields.decodeIfPresent(String.self, forKey: .note)
+        linkDescription = try fields.decodeIfPresent(String.self, forKey: .linkDescription)
+        createdAt = try fields.decode(Date.self, forKey: .createdAt)
+        status = try fields.decode(EntryStatus.self, forKey: .status)
+        titleWasEdited = try fields.decodeIfPresent(Bool.self, forKey: .titleWasEdited) ?? false
+    }
 }
 
 func webURL(_ text: String) -> URL? {
@@ -66,81 +85,69 @@ final class Inbox: ObservableObject {
     @Published var error: String?
     @Published private(set) var deleted: Entry?
     @Published private(set) var isRefreshingTitles = false
-    private var fetching: Set<UUID> = []
+    private var queuedTitles: [UUID: Bool] = [:]
+    private var checkedTitles: [UUID: URL] = [:]
 
-    var canRefreshTitles: Bool {
-        entries.contains { entry in
-            !entry.titleWasEdited && (entry.url.map {
-                LinkMetadata.allowsRequest(to: $0) && LinkMetadata.needsTitle(entry.title, for: $0)
-            } ?? false)
-        }
-    }
+    var canRefreshTitles: Bool { entries.contains { titleURL(for: $0) != nil } }
     var onChange: (() -> Void)?
     static let automaticTitlesKey = "autoFetchLinkTitles"
-    private var fetchAutomatically: Bool { UserDefaults.standard.bool(forKey: Self.automaticTitlesKey) }
-    private let file: URL
-    private var loaded = false
+    private var fetchAutomatically: Bool { UserDefaults.standard.object(forKey: Self.automaticTitlesKey) as? Bool ?? true }
+    private let store: InboxStore
+    private var snapshot: InboxStore.Snapshot?
     var count: Int { entries.lazy.filter { $0.status == .inbox }.count }
 
     init(file: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Laterfold/inbox.json")) {
-        self.file = file
-        reload()
+        store = InboxStore(file: file)
+        loadIfNeeded()
     }
 
-    func reload() {
-        guard !loaded else { return }
+    private func loadIfNeeded() {
+        guard snapshot == nil else { return }
         do {
-            entries = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: file))
-            loaded = true
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            loaded = true
+            apply(try store.read())
         } catch {
-            self.error = "Could not read the inbox. The original file is at \(file.path). \(error.localizedDescription)"
+            self.error = "Could not read the inbox at \(store.file.path). \(error.localizedDescription)"
         }
+    }
+
+    private func apply(_ snapshot: InboxStore.Snapshot) {
+        self.snapshot = snapshot
+        entries = snapshot.entries
         onChange?()
     }
 
     @discardableResult
     private func persist(_ next: [Entry]) -> Bool {
-        reload()
-        guard loaded else { return false }
+        guard let snapshot else { return false }
         do {
-            let directory = file.deletingLastPathComponent()
-            let manager = FileManager.default
-            try manager.createDirectory(at: directory, withIntermediateDirectories: true,
-                                        attributes: [.posixPermissions: 0o700])
-            let attributes = try manager.attributesOfItem(atPath: directory.path)
-            guard attributes[.type] as? FileAttributeType == .typeDirectory else {
-                throw CocoaError(.fileWriteInvalidFileName)
-            }
-            if attributes[.posixPermissions] as? Int != 0o700 {
-                try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
-            }
-            try JSONEncoder().encode(next).write(to: file, options: .atomic)
-            entries = next
-            onChange?()
+            apply(try store.write(next, replacing: snapshot.revision))
+            error = nil
             return true
+        } catch InboxStore.Failure.changed(let current) {
+            apply(current)
+            error = InboxStore.Failure.changed(current).localizedDescription
+            return false
         } catch {
             self.error = "Could not save changes. \(error.localizedDescription)"
             return false
         }
     }
 
+    private func duplicate(of url: URL, excluding id: UUID? = nil) -> Entry? {
+        let identity = linkIdentity(url)
+        return entries.first { $0.id != id && $0.url.map(linkIdentity) == identity }
+    }
+
     func add(_ input: String, category: Category?) -> AddEntryResult {
         let title = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return .failed }
-        reload()
+        loadIfNeeded()
         let url = webURL(title)
-        if let url {
-            let identity = linkIdentity(url)
-            if let existing = entries.first(where: { $0.url.map(linkIdentity) == identity }) {
-                return .duplicate(existing)
-            }
-        }
-        let entry = Entry(title: title, url: url, site: url?.host, category: category)
+        if let url, let existing = duplicate(of: url) { return .duplicate(existing) }
+        let entry = Entry(title: title, url: url, category: category)
         guard persist(entries + [entry]) else { return .failed }
-        if fetchAutomatically { fetchTitle(for: entry) }
+        enqueueTitles([entry], manual: false)
         return .saved
     }
 
@@ -156,6 +163,10 @@ final class Inbox: ObservableObject {
         guard let current = entries.first(where: { $0.id == draft.id }) else { return false }
         let changedTitle = draft.title != originalTitle
         let changedURL = draft.url != current.url
+        if changedURL, let url = draft.url, let existing = duplicate(of: url, excluding: draft.id) {
+            error = "That link is already saved as “\(existing.title)”."
+            return false
+        }
         let saved = update(draft.id) {
             if changedTitle {
                 $0.titleWasEdited = true
@@ -163,26 +174,23 @@ final class Inbox: ObservableObject {
             } else if changedURL, !$0.titleWasEdited, let url = draft.url {
                 $0.title = url.absoluteString
             }
+            if changedURL { $0.linkDescription = nil }
             $0.url = draft.url
-            $0.site = draft.url?.host
             $0.category = draft.category
             $0.note = draft.note
         }
-        if saved, changedURL, fetchAutomatically, let updated = entries.first(where: { $0.id == draft.id }), !updated.titleWasEdited {
-            fetchTitle(for: updated)
+        if saved, changedURL, let updated = entries.first(where: { $0.id == draft.id }), !updated.titleWasEdited {
+            enqueueTitles([updated], manual: false)
         }
         return saved
     }
 
+    func refreshVisibleLinkTitles() {
+        enqueueTitles(entries.filter { $0.status == .inbox }, manual: false)
+    }
+
     func refreshLinkTitles() {
-        guard !isRefreshingTitles, canRefreshTitles else { return }
-        isRefreshingTitles = true
-        let pending = entries
-        Task { [weak self] in
-            guard let self else { return }
-            for entry in pending { await self.resolveTitle(for: entry) }
-            self.isRefreshingTitles = false
-        }
+        enqueueTitles(entries, manual: true)
     }
 
     func delete(_ entry: Entry) {
@@ -196,26 +204,45 @@ final class Inbox: ObservableObject {
         self.deleted = nil
     }
 
-    private func fetchTitle(for entry: Entry) {
-        Task { [weak self] in await self?.resolveTitle(for: entry) }
+    private func titleURL(for entry: Entry) -> URL? {
+        guard !entry.titleWasEdited, let url = entry.url,
+              LinkMetadata.allowsRequest(to: url),
+              LinkMetadata.needsTitle(entry.title, for: url) else { return nil }
+        return url
     }
 
-    private func resolveTitle(for entry: Entry) async {
-        guard let url = entry.url,
-              let current = entries.first(where: { $0.id == entry.id }),
-              current.url == url, !current.titleWasEdited,
-              LinkMetadata.needsTitle(current.title, for: url),
-              fetching.insert(entry.id).inserted else { return }
-        defer { fetching.remove(entry.id) }
-        let title = await LinkMetadata.title(for: url)
-        guard let latest = entries.first(where: { $0.id == entry.id }), !latest.titleWasEdited else { return }
-        if latest.url != url {
-            if fetchAutomatically {
-                fetching.remove(entry.id)
-                fetchTitle(for: latest)
+    private func enqueueTitles(_ candidates: [Entry], manual: Bool) {
+        for entry in candidates {
+            guard let url = titleURL(for: entry) else { continue }
+            let youtube = LinkMetadata.canonicalYouTubeURL(for: url) != nil
+            if !manual && checkedTitles[entry.id] == url { continue }
+            guard manual || fetchAutomatically || youtube else { continue }
+            queuedTitles[entry.id] = manual || queuedTitles[entry.id] == true
+        }
+        guard !isRefreshingTitles, !queuedTitles.isEmpty else { return }
+        isRefreshingTitles = true
+        Task { [weak self] in await self?.drainTitles() }
+    }
+
+    private func drainTitles() async {
+        defer { isRefreshingTitles = false }
+        while let (id, manual) = queuedTitles.first {
+            queuedTitles.removeValue(forKey: id)
+            guard let entry = entries.first(where: { $0.id == id }),
+                  let url = titleURL(for: entry) else { continue }
+            let allowPageFetch = manual || fetchAutomatically
+            let youtube = LinkMetadata.canonicalYouTubeURL(for: url) != nil
+            guard allowPageFetch || youtube else { continue }
+            checkedTitles[id] = url
+            guard let preview = await LinkMetadata.preview(for: url, allowPageFetch: allowPageFetch),
+                  let latest = entries.first(where: { $0.id == id }),
+                  titleURL(for: latest) == url,
+                  preview.title != nil || (preview.description != nil && preview.description != latest.linkDescription)
+            else { continue }
+            update(id) {
+                if let title = preview.title { $0.title = title }
+                if let description = preview.description { $0.linkDescription = description }
             }
-        } else if let title, LinkMetadata.needsTitle(latest.title, for: url) {
-            update(entry.id) { $0.title = title }
         }
     }
 }
